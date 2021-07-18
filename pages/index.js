@@ -4,6 +4,8 @@
 //  color: ${({ theme }) => theme.colors.primary};
 //`
 import React from 'react';
+import nookies from 'nookies';
+import jwt from 'jsonwebtoken';
 import MainGrid from '../src/components/MainGrid'
 import Box from '../src/components/Box'
 import { AlurakutMenu, AlurakutProfileSidebarMenuDefault, OrkutNostalgicIconSet } from '../src/lib/AlurakutCommons'
@@ -29,12 +31,32 @@ function ProfileSidebar(propriedades) {
   )
 }
 
-export default function Home() {
-  const usuario = 'LohanyR';
-  const [comunidades, setComunidades] = React.useState([{
-    title: 'Eu odeio acordar cedo',
-    image: 'https://alurakut.vercel.app/capa-comunidade-01.jpg'
-  }]);
+function ProfileRelationsBox(propriedades){
+  return (
+    <ProfileRelationsBoxWrapper>
+      <h2 className= "smallTitle">
+        {propriedades.title} ({propriedades.items.length})
+      </h2>
+      <ul>
+        {/*comunidades.map((itemAtual) => {
+          return (
+            <li>
+              <a href={`/users/${itemAtual.title}`} key={itemAtual.title}>
+                <img src={itemAtual.image} />
+                <span>{itemAtual.title}</span>
+              </a>
+            </li>
+          )
+
+        })}*/} 
+      </ul>
+    </ProfileRelationsBoxWrapper>
+  )
+}
+
+export default function Home(props) {
+  const usuario = props.githubUser;
+  const [comunidades, setComunidades] = React.useState([]);
   //const comunidades = comunidades[0];
   //const alteradorDecomunidades/setComunidades = comunidades[1];
   
@@ -49,7 +71,50 @@ export default function Home() {
     'felipefialho'
   ]
 
-  return ( 
+  const [seguidores, setSeguidores]= React.useState([]);
+
+  React.useEffect(function(){
+    fetch('https://api.github.com/users/LohanyR/followers')
+    .then(function (respostaDoServidor) {
+      return respostaDoServidor.json();
+    })
+
+    .then(function(respostaCompleta) {
+      setSeguidores(respostaCompleta);
+    }) 
+
+    //API GraphQL
+    fetch("https://graphql.datocms.com/", {
+      method: 'POST',
+
+      headers: {
+        'Authorization': '34933f13b54f7d7d17a870d5604c90',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+
+      body: JSON.stringify ({  "query": `query{
+        allCommunities {
+         id
+         title
+         imageUrl
+         creatorSlug
+        }
+      }`})
+    })
+
+    .then((response) => response.json())//pega e responde
+    .then((respostaCompleta) => {
+      const comunidadesVindasDoDato = respostaCompleta.data.allCommunities;
+      console.log(comunidadesVindasDoDato)
+      setComunidades(comunidadesVindasDoDato)
+    })
+    
+  }, [])
+
+  console.log('seguidores antes do return', seguidores);
+    
+  return( 
     <>
      <AlurakutMenu/>
      <MainGrid>
@@ -74,13 +139,28 @@ export default function Home() {
               console.log('Campo: ', dadosDoForm.get('image'));
 
               const comunidade = {
-                
+                //id: new Date().toISOString() não precisa mais porq ja tem creatorslug
                 title: dadosDoForm.get('title'),
-                image: dadosDoForm.get('image'),
+                imageUrl: dadosDoForm.get('image'),
+                creatorSlug: usuario,
               }
 
-              const comunidadesAtualizadas = [...comunidades, comunidade];
-              setComunidades(comunidadesAtualizadas)
+              fetch('/api/comunidades', {
+                method: 'POST',
+                headers: {
+                  'content-Type': 'application/json'
+                },
+                body: JSON.stringify(comunidade)
+              })
+
+              .then(async (response) => {
+                const dados = await response.json();
+                console.log(dados.registroCriado);
+                const comunidades = dados.registroCriado;
+                const comunidadesAtualizadas = [...comunidades, comunidade];
+                setComunidades(comunidadesAtualizadas)
+              })
+
             }}>
             <div>
               <input
@@ -105,23 +185,24 @@ export default function Home() {
         </Box>
       </div>
       <div className="profileRelationsArea" style={{ gridArea: 'profileRelationsArea'}}>
+        <ProfileRelationsBox title="Seguidores" items={seguidores}/>
         <ProfileRelationsBoxWrapper>
         <h2 className= "smallTitle">
-            Comunidades ({comunidades.length})
-          </h2>
-          <ul>
-            {comunidades.map((itemAtual) => {
-              return (
-                <li>
-                  <a href={`/users/${itemAtual.title}`} key={itemAtual.title}>
-                    <img src={itemAtual.image} />
-                    <span>{itemAtual.title}</span>
-                  </a>
-                </li>
-              )
+          Comunidades ({comunidades.length})
+        </h2>
+        <ul>
+          {comunidades.map((itemAtual) => {
+            return (
+              <li key={itemAtual.id}>
+                <a href={`/communities/${itemAtual.id}`}>
+                  <img src={itemAtual.imageUrl}/>
+                  <span>{itemAtual.title}</span>
+                </a>
+              </li>
+            )
 
-            })}
-          </ul>
+          })}
+        </ul>
         </ProfileRelationsBoxWrapper>
 
         <ProfileRelationsBoxWrapper>
@@ -149,3 +230,30 @@ export default function Home() {
     </>
   )
 }
+
+export async function getServerSideProps(context) {
+  const cookies = nookies.get(context)
+  const token = cookies.USER_TOKEN;
+  const { isAuthenticated } = await fetch('https://alurakut.vercel.app/api/auth', {
+    headers: {
+        Authorization: token
+      }
+  })
+  .then((resposta) => resposta.json())
+
+  if(!isAuthenticated) {
+    return {
+      redirect: {
+        destination: '/login',
+        permanent: false,
+      }
+    }
+  }
+
+  const { githubUser } = jwt.decode(token);
+  return {
+    props: {
+      githubUser
+    }, // will be passed to the page component as props
+  }
+} 
